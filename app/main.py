@@ -13,6 +13,7 @@ class Unit(BaseModel):
     name: Optional[str] = None
     start_line: Optional[int] = None
     end_line: Optional[int] = None
+    src: Optional[str] = ""
     code: Optional[str] = ""
 
 # Regex to capture READ TABLE statements
@@ -36,6 +37,12 @@ def extract_sort_statements(txt: str):
         fields = [f.strip().upper() for f in re.split(r"[ ,]+", fields_raw) if f.strip()]
         sort_map[itab] = fields
     return sort_map
+
+# --- SNIPPET HELPER ---
+def snippet_at(text: str, start: int, end: int) -> str:
+    s = max(0, start - 60)
+    e = min(len(text), end + 60)
+    return text[s:e].replace("\n", "\\n")
 
 def fields_match(sort_fields: List[str], key_fields: List[str]) -> bool:
     """
@@ -65,11 +72,13 @@ def find_read_table_usage(txt: str):
         # Extract fields from WITH KEY clause
         fields = re.findall(r"(\w+)\s*=", keys_raw, re.IGNORECASE)
         fields = [f.upper() for f in fields]
+        
 
         sort_fields = sort_map.get(itab.upper(), [])
         already_sorted = fields_match(sort_fields, fields)
 
         if not already_sorted:
+            start, end = m.span()
             matches.append({
                 "table": itab,
                 "target_type": "READ_TABLE",
@@ -80,6 +89,7 @@ def find_read_table_usage(txt: str):
                 "ambiguous": False,
                 "suggested_statement": f"SORT {itab} BY {', '.join(fields)}." if fields else None,
                 "suggested_fields": fields if fields else None,
+                "snippet": m.group(0).replace("\n", "\\n")
             })
 
     return matches
@@ -88,7 +98,7 @@ def find_read_table_usage(txt: str):
 def remediate_read_table(units: List[Unit]):
     results = []
     for u in units:
-        src = u.code or ""
+        src = u.code or u.src or ""
         metadata = find_read_table_usage(src)
 
         obj = json.loads(u.model_dump_json())
